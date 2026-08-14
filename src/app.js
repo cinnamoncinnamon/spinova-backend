@@ -110,7 +110,6 @@ httpServer.on("upgrade", (req, socket, head) => {
 });
 
 startTelegramBot();
-
-httpServer.listen(PORT, () => {
-  console.log(`SPINOVA backend running on http://localhost:${PORT}`);
+httpServer.listen(PORT, "0.0.0.0", () => {
+  console.log(`SPINOVA backend running on port ${PORT}`);
 });
