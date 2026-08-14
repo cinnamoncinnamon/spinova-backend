@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS admin_settings (
+  key VARCHAR(50) PRIMARY KEY,
+  value VARCHAR(200) NOT NULL,
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+

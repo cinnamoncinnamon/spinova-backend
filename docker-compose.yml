@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: spinova-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: spinova
+      POSTGRES_PASSWORD: spinova_dev_password
+      POSTGRES_DB: spinova
+    ports:
+      - "5432:5432"
+    volumes:
+      - spinova_pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: spinova-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  spinova_pg_data:
