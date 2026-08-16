@@ -1,6 +1,7 @@
-// Server-side mirror of rx8's src/utils/sanitize.js mobile/password rules.
-// The frontend doing this too is a UX nicety; this copy is the one that
-// actually matters, because a request can always skip the frontend entirely.
+/* ─────────────────────────────────────────────────────────────────────────────
+   SPINOVA Input Sanitizer (backend)
+   Server-side rules — this is what actually matters.
+───────────────────────────────────────────────────────────────────────────── */
 
 export function sanitize(val) {
   if (typeof val !== "string") return "";
@@ -12,12 +13,32 @@ export function sanitize(val) {
     .trim();
 }
 
-// Accepts 01XXXXXXXXX (11 digits) or +8801XXXXXXXXX, normalizes to +880...
+// Accepts:
+//   01XXXXXXXXX
+//   +8801XXXXXXXXX
+//   +88001XXXXXXXXX  (frontend bug: "+880" + "01…")
+// Always returns value as 01XXXXXXXXX
 export function validateMobile(val) {
-  const cleaned = val.replace(/\s/g, "");
-  if (/^\+8801[3-9]\d{8}$/.test(cleaned)) return { ok: true, value: cleaned };
-  if (/^01[3-9]\d{8}$/.test(cleaned)) return { ok: true, value: "+880" + cleaned };
-  return { ok: false, message: "Enter a valid BD mobile number (e.g. 01XXXXXXXXX)" };
+  let digits = String(val || "").replace(/\D/g, "");
+
+  // +8800 + 1XXXXXXXXX (14 digits) → fix extra 0 after 880
+  if (digits.startsWith("8800") && digits.length === 14) {
+    digits = "880" + digits.slice(4);
+  }
+
+  // 8801XXXXXXXXX (13 digits) → 01XXXXXXXXX
+  if (digits.startsWith("880") && digits.length === 13) {
+    digits = digits.slice(2);
+  }
+
+  if (/^01[3-9]\d{8}$/.test(digits)) {
+    return { ok: true, value: digits };
+  }
+
+  return {
+    ok: false,
+    message: "Enter a valid BD mobile number (e.g. 01XXXXXXXXX)",
+  };
 }
 
 export function validatePassword(val) {
@@ -66,16 +87,21 @@ export function validateLoginInput({ mobile, password }) {
   return { ok: true, mobile: mobileCheck.value };
 }
 
-// Accepts the recovery code as shown to the user: XXXX-XXXX-XXXX
-// (uppercase letters/digits, dashes optional on input).
 export function validateRecoveryCode(val) {
   if (typeof val !== "string") return { ok: false, message: "Recovery code is required." };
   const cleaned = val.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (cleaned.length !== 12) return { ok: false, message: "Enter your 12-character recovery code." };
+  if (cleaned.length !== 12) {
+    return { ok: false, message: "Enter your 12-character recovery code." };
+  }
   return { ok: true, value: cleaned };
 }
 
-export function validateForgotPasswordInput({ mobile, recoveryCode, newPassword, confirmNewPassword }) {
+export function validateForgotPasswordInput({
+  mobile,
+  recoveryCode,
+  newPassword,
+  confirmNewPassword,
+}) {
   const cleanMobile = sanitize(mobile || "");
 
   if (!cleanMobile || !recoveryCode || !newPassword || !confirmNewPassword) {
@@ -95,5 +121,9 @@ export function validateForgotPasswordInput({ mobile, recoveryCode, newPassword,
     return { ok: false, message: "Passwords don't match." };
   }
 
-  return { ok: true, mobile: mobileCheck.value, recoveryCode: codeCheck.value };
+  return {
+    ok: true,
+    mobile: mobileCheck.value,
+    recoveryCode: codeCheck.value,
+  };
 }
