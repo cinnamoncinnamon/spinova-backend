@@ -109,6 +109,13 @@ const GAME_MARKETS = {
       max_liability: null,
     },
   },
+  // Plinko — single market. RTP switch: 96 (default, 4% edge) or 95 (5% edge).
+  plinko: {
+    modes: [{ id: "plinko", label: "Plinko" }],
+    controls: {
+      plinko_rtp: ["96", "95"], // default 96 when no row exists
+    },
+  },
 };
 
 // Numeric free-text fields don't all share the same valid range — multiplier
@@ -490,6 +497,7 @@ const GAME_GROUPS = [
   { id: "goldenrelics", name: "Golden Relics", category: "Slots", gameIds: ["goldenrelics"] },
   { id: "elementsfury", name: "Elements Fury", category: "Slots", gameIds: ["elementsfury", "elementsfury-buyfeature"] },
   { id: "tombraiders", name: "Tomb Raiders", category: "Slots", gameIds: ["tombraiders", "tombraiders-gamble"] },
+  { id: "plinko", name: "Plinko", category: "Arcade", gameIds: ["plinko"] },
 ];
 const GAME_GROUP_INDEX = {};
 for (const g of GAME_GROUPS) GAME_GROUP_INDEX[g.id] = g;

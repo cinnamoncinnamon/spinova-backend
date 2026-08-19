@@ -12,6 +12,7 @@ import promoRoutes from "./routes/promo.js";
 import adminAuthRoutes from "./routes/adminAuth.js";
 import adminRoutes from "./routes/admin.js";
 import slotsRoutes from "./routes/slots.js";
+import plinkoRoutes from "./routes/plinko.js";
 import { globalLimiter } from "./middleware/rateLimiter.js";
 import { startTelegramBot } from "./services/telegramBot.js";
 import { isAppOnline } from "./services/gameSettings.js";
@@ -61,6 +62,7 @@ app.use("/api/promo", promoRoutes);
 app.use("/api/admin", adminAuthRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/games/slots", slotsRoutes);
+app.use("/api/plinko", plinkoRoutes);
 
 // Never leak stack traces or internals to the client (master plan: "never
 // expose internals"). Logs the real error server-side only.
