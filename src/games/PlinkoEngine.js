@@ -1,108 +1,83 @@
 /**
- * Plinko Engine — server-authoritative result generation.
+ * Plinko Engine — server-authoritative, provably-fair style path.
  *
- * Frontend only animates. The bin / multiplier is decided here.
- *
- * RTP modes (admin-controlled via game_controls):
- *   plinko_rtp = "96"  → ~96% RTP (default, 4% house edge)
- *   plinko_rtp = "95"  → ~95% RTP (5% house edge)
- *
- * 16 rows → 17 bins. Multipliers are symmetric (high on edges, low in middle).
- * Result is chosen by weighted random over the probability mass of each bin
- * so the long-run average matches the target RTP.
+ * - 16 rows → 17 bins
+ * - Each row is exact 50/50 (crypto random) → binomial(16, 0.5)
+ * - Risk tables (low / medium / high) scaled to ~96% RTP (≈4% house edge)
+ * - Returns full L/R path so the client can animate exactly like the reference game
  */
 
 import crypto from "crypto";
-import { pool } from "../db/pool.js";
 import { v4 as uuidv4 } from "uuid";
 
 export const GAME_ID = "plinko";
+export const ROWS = 16;
+export const BUCKETS = ROWS + 1;
 export const DEFAULT_LINES = 16;
-export const MIN_LINES = 8;
+export const MIN_LINES = 16; // fixed 16-row board (matches reference game)
 export const MAX_LINES = 16;
 export const BET_STEPS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
 
-// ── Multiplier tables (17 bins for 16 rows) ────────────────────────────────
-// Values chosen so a fair-ish distribution yields the target RTP.
-// Index 0 = far left, 16 = far right.
-
-const MULTIPLIERS_96 = [
-  110, 41, 10, 5, 3, 1.5, 1, 0.5, 0.3, 0.5, 1, 1.5, 3, 5, 10, 41, 110,
-];
-
-const MULTIPLIERS_95 = [
-  100, 35, 8, 4, 2.5, 1.2, 0.8, 0.4, 0.2, 0.4, 0.8, 1.2, 2.5, 4, 8, 35, 100,
-];
-
-// Relative probability weights (approximate binomial shape for 16 rows).
-// Higher weight = more common. Edges are rare, middle is common.
-// These are the same shape for both tables; only the multipliers change.
-const BIN_WEIGHTS_16 = [
-  1, 4, 12, 30, 60, 100, 140, 170, 180, 170, 140, 100, 60, 30, 12, 4, 1,
-];
-
-function getMultipliers(rtp) {
-  return rtp === "95" ? MULTIPLIERS_95 : MULTIPLIERS_96;
-}
+/** @typedef {"low"|"medium"|"high"} Risk */
 
 /**
- * Read current RTP setting from game_controls.
- * Default = "96".
+ * Multiplier tables — same shape as Stake/Aztec reference, scaled to ~96% RTP
+ * under true binomial(16, 0.5) probabilities.
+ *
+ * Verified EV:
+ *   low    ≈ 95.97%
+ *   medium ≈ 95.76%
+ *   high   ≈ 95.69%
  */
-export async function getPlinkoRtp() {
-  try {
-    const { rows } = await pool.query(
-      "SELECT value FROM game_controls WHERE game_id = $1 AND key = $2",
-      [GAME_ID, "plinko_rtp"]
-    );
-    const v = rows[0]?.value;
-    return v === "95" ? "95" : "96";
-  } catch {
-    return "96";
+export const MULTIPLIERS = {
+  low: [
+    15.5, 8.7, 1.94, 1.36, 1.36, 1.16, 1.07, 0.97, 0.48,
+    0.97, 1.07, 1.16, 1.36, 1.36, 1.94, 8.7, 15.5,
+  ],
+  medium: [
+    106.7, 39.8, 9.7, 4.85, 2.91, 1.45, 0.97, 0.48, 0.29,
+    0.48, 0.97, 1.45, 2.91, 4.85, 9.7, 39.8, 106.7,
+  ],
+  high: [
+    970, 126, 25.2, 8.73, 3.88, 1.94, 0.19, 0.19, 0.19,
+    0.19, 0.19, 1.94, 3.88, 8.73, 25.2, 126, 970,
+  ],
+};
+
+export const RISKS = /** @type {Risk[]} */ (["low", "medium", "high"]);
+
+/**
+ * True binomial path: each of 16 rows is an independent fair coin flip.
+ * binIndex = number of "right" moves (0 .. 16).
+ */
+function generatePath() {
+  const buf = crypto.randomBytes(ROWS);
+  const path = [];
+  for (let i = 0; i < ROWS; i++) {
+    path.push(buf[i] & 1); // 0 = left, 1 = right
   }
+  const binIndex = path.reduce((a, b) => a + b, 0);
+  return { path, binIndex };
 }
 
 /**
- * Weighted random bin index (0 .. 16).
+ * @param {{ risk?: Risk }} opts
  */
-function pickBinIndex(weights) {
-  const total = weights.reduce((a, b) => a + b, 0);
-  // crypto random for better quality than Math.random
-  const buf = crypto.randomBytes(4);
-  const r = (buf.readUInt32BE(0) / 0xffffffff) * total;
-  let acc = 0;
-  for (let i = 0; i < weights.length; i++) {
-    acc += weights[i];
-    if (r <= acc) return i;
-  }
-  return weights.length - 1;
-}
-
-/**
- * Generate a play result (no wallet side-effects).
- * Used by the route after balance checks.
- */
-export async function generateResult({ lines = DEFAULT_LINES } = {}) {
-  const safeLines = Math.min(MAX_LINES, Math.max(MIN_LINES, Number(lines) || DEFAULT_LINES));
-  // For now we only fully support 16-row table. Other line counts reuse the
-  // same 17-bin table (frontend can still show different pin counts visually).
-  const rtp = await getPlinkoRtp();
-  const multipliers = getMultipliers(rtp);
-  const weights = BIN_WEIGHTS_16;
-
-  const binIndex = pickBinIndex(weights);
-  const multiplier = multipliers[binIndex];
-
+export async function generateResult({ risk = "medium" } = {}) {
+  const safeRisk = RISKS.includes(risk) ? risk : "medium";
+  const table = MULTIPLIERS[safeRisk];
+  const { path, binIndex } = generatePath();
+  const multiplier = table[binIndex];
   const roundId = uuidv4();
 
   return {
     roundId,
-    lines: safeLines,
+    lines: ROWS,
+    risk: safeRisk,
+    path,
     binIndex,
     multiplier,
-    rtp,
-    // Optional: simple left/right path hints for animation (not required)
-    // path is just cosmetic — server already decided the bin.
+    rtp: "96",
   };
 }
 
@@ -115,18 +90,33 @@ export function isValidBet(amount) {
   );
 }
 
+export function isValidRisk(risk) {
+  return RISKS.includes(risk);
+}
+
 /**
- * Theoretical RTP for a table (for admin / docs).
- * Sum(weight_i * mult_i) / sum(weights)
+ * Theoretical RTP for a risk table under binomial(16, 0.5).
  */
-export function theoreticalRtp(rtpMode = "96") {
-  const mults = getMultipliers(rtpMode);
-  const weights = BIN_WEIGHTS_16;
-  let sumW = 0;
-  let sumWM = 0;
-  for (let i = 0; i < mults.length; i++) {
-    sumW += weights[i];
-    sumWM += weights[i] * mults[i];
+export function theoreticalRtp(risk = "medium") {
+  const mults = MULTIPLIERS[RISKS.includes(risk) ? risk : "medium"];
+  const n = 1 << ROWS;
+  function binom(nn, k) {
+    let r = 1;
+    for (let i = 0; i < k; i++) r = (r * (nn - i)) / (i + 1);
+    return Math.round(r);
   }
-  return Math.round((sumWM / sumW) * 10000) / 100; // e.g. 96.12
+  let ev = 0;
+  for (let k = 0; k <= ROWS; k++) {
+    ev += (binom(ROWS, k) / n) * mults[k];
+  }
+  return Math.round(ev * 10000) / 100; // e.g. 95.76
+}
+
+/** Display helpers for /info */
+export function getTables() {
+  return {
+    low: MULTIPLIERS.low,
+    medium: MULTIPLIERS.medium,
+    high: MULTIPLIERS.high,
+  };
 }
